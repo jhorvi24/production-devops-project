@@ -126,11 +126,7 @@ resource "aws_eks_cluster" "main" {
   }
 
   # Logging del control plane
-  dynamic "enabled_cluster_log_types" {
-    for_each = var.enable_cluster_logging ? [1] : []
-    content {
-    }
-  }
+  enabled_cluster_log_types = var.enable_cluster_logging ? var.cluster_log_types : []
 
   tags = {
     Name = "${var.project_name}-${var.environment}-eks"
