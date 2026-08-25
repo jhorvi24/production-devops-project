@@ -51,22 +51,22 @@ provider "aws" {
 
 # Provider de Kubernetes - se configura después de crear EKS
 provider "kubernetes" {
-  host                   = try(module.eks.cluster_endpoint, "")
-  cluster_ca_certificate = try(base64decode(module.eks.cluster_ca_certificate), "")
-  token                  = try(data.aws_eks_cluster_auth.cluster.token, "")
+  host                   = try(module.eks[0].cluster_endpoint, "")
+  cluster_ca_certificate = try(base64decode(module.eks[0].cluster_ca_certificate), "")
+  token                  = try(data.aws_eks_cluster_auth.cluster[0].token, "")
 }
 
 # Provider de Helm - para instalar charts en EKS
 provider "helm" {
   kubernetes {
-    host                   = try(module.eks.cluster_endpoint, "")
-    cluster_ca_certificate = try(base64decode(module.eks.cluster_ca_certificate), "")
-    token                  = try(data.aws_eks_cluster_auth.cluster.token, "")
+    host                   = try(module.eks[0].cluster_endpoint, "")
+    cluster_ca_certificate = try(base64decode(module.eks[0].cluster_ca_certificate), "")
+    token                  = try(data.aws_eks_cluster_auth.cluster[0].token, "")
   }
 }
 
 # Data source para autenticación con EKS
 data "aws_eks_cluster_auth" "cluster" {
   count = var.create_eks ? 1 : 0
-  name  = module.eks.cluster_name
+  name  = module.eks[0].cluster_name
 }
