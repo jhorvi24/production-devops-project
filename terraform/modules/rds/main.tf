@@ -124,10 +124,11 @@ resource "aws_db_parameter_group" "main" {
     value = "1000"  # Log queries que tarden más de 1 segundo
   }
 
-  # Estadísticas de queries
+  # Estadísticas de queries (parámetro estático - requiere reboot)
   parameter {
-    name  = "shared_preload_libraries"
-    value = "pg_stat_statements"
+    name         = "shared_preload_libraries"
+    value        = "pg_stat_statements"
+    apply_method = "pending-reboot"
   }
 
   # Máximo de conexiones (importante para el escenario de incidente #1)
