@@ -1,0 +1,56 @@
+# =============================================================================
+# ESCENARIO DE INCIDENTE #2: Memory Leak (OOMKilled)
+# =============================================================================
+# Este archivo define cómo inyectar la falla Y cómo se manifiesta.
+# El runbook correspondiente documenta cómo resolverlo.
+# =============================================================================
+
+scenario:
+  name: "Memory Leak - OOMKilled"
+  severity: SEV-2
+  category: resource-exhaustion
+  affected_service: payment-service
+  expected_resolution_time: "10-20 minutes"
+
+  description: |
+    El payment-service tiene un memory leak que causa que el pod sea
+    terminado por Kubernetes (OOMKilled) cuando excede su memory limit.
+    El pod entra en CrashLoopBackOff porque se reinicia y vuelve a leakear.
+
+  symptoms:
+    - "Pod payment-service en estado CrashLoopBackOff"
+    - "OOMKilled en los eventos del pod"
+    - "Métrica container_memory_usage_bytes creciendo linealmente"
+    - "Alertas PodMemoryHigh y PodCrashLooping disparadas"
+    - "Payment failure rate incrementando"
+
+  injection:
+    method: "API call al endpoint de debug"
+    commands:
+      - description: "Inyectar memory leak (10MB por llamada)"
+        command: |
+          # Llamar repetidamente al endpoint de leak
+          for i in $(seq 1 50); do
+            kubectl exec -n applications deploy/api-gateway -- \
+              curl -s -X POST http://payment-service:8080/debug/leak
+            sleep 2
+          done
+      - description: "Verificar que el pod está consumiendo memoria"
+        command: |
+          kubectl top pods -n applications -l app=payment-service
+
+  detection:
+    alerts:
+      - "PodMemoryHigh (warning)"
+      - "PodCrashLooping (critical)"
+      - "PaymentFailureRateHigh (critical)"
+    grafana_dashboard: "services-overview"
+    cloudwatch_alarm: "node-memory-high"
+    kubectl_commands:
+      - "kubectl get pods -n applications -l app=payment-service"
+      - "kubectl describe pod -n applications -l app=payment-service"
+      - "kubectl top pods -n applications"
+
+  cleanup:
+    commands:
+      - "kubectl rollout restart deployment/payment-service -n applications"

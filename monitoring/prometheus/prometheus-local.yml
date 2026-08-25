@@ -1,0 +1,19 @@
+# =============================================================================
+# PROMETHEUS - Configuración local (docker-compose)
+# =============================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:9090']
+
+  - job_name: 'order-service'
+    static_configs:
+      - targets: ['order-service:9090']
+
+  - job_name: 'payment-service'
+    static_configs:
+      - targets: ['payment-service:9090']

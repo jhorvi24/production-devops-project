@@ -1,0 +1,61 @@
+# =============================================================================
+# ESCENARIO DE INCIDENTE #1: Alta Latencia en RDS
+# =============================================================================
+
+scenario:
+  name: "High Database Latency - Connection Pool Saturation"
+  severity: SEV-2
+  category: performance-degradation
+  affected_service: order-service
+  expected_resolution_time: "15-30 minutes"
+
+  description: |
+    El connection pool de PostgreSQL se satura por un incremento de tráfico
+    o queries lentas sin índice. Los requests empiezan a encolar esperando
+    una conexión disponible, causando timeouts en cascada.
+
+  symptoms:
+    - "P99 latency del order-service > 5 segundos"
+    - "CloudWatch alarm RDS-connections-high disparada"
+    - "Métrica db_query_duration_seconds incrementando"
+    - "Timeouts en el api-gateway llamando a order-service"
+    - "Usuarios reportan 'Order submission taking too long'"
+
+  injection:
+    method: "Stress test con conexiones concurrentes"
+    commands:
+      - description: "Generar carga alta con muchas conexiones paralelas"
+        command: |
+          # Instalar pgbench si no existe
+          kubectl run pgbench --rm -it --image=postgres:15 -n applications -- \
+            pgbench -h $DB_HOST -U dbadmin -d production_sim \
+            -c 100 -j 10 -T 300
+
+      - description: "Alternativa: queries lentas sin índice"
+        command: |
+          kubectl exec -it deploy/order-service -n applications -- \
+            python -c "
+          import psycopg2, time
+          conn = psycopg2.connect(host='$DB_HOST', dbname='production_sim', user='dbadmin', password='$DB_PASSWORD')
+          cur = conn.cursor()
+          # Query lenta sin índice que bloquea conexiones
+          for i in range(100):
+              cur.execute('SELECT pg_sleep(5)')
+          "
+
+  detection:
+    alerts:
+      - "HighLatency (warning)"
+      - "DatabaseLatencyHigh (warning)"
+    cloudwatch_alarms:
+      - "rds-cpu-high"
+      - "rds-connections-high"
+    metrics:
+      - "db_query_duration_seconds"
+      - "http_request_duration_seconds{app='order-service'}"
+    rds_performance_insights: true
+
+  cleanup:
+    commands:
+      - "kubectl delete pod pgbench -n applications --ignore-not-found"
+      - "# Verificar que las conexiones vuelven a la normalidad en CloudWatch"

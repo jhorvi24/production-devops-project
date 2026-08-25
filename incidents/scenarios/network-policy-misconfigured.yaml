@@ -1,0 +1,70 @@
+# =============================================================================
+# ESCENARIO DE INCIDENTE #7: Network Policy Mal Configurada
+# =============================================================================
+
+scenario:
+  name: "Network Policy Blocks Legitimate Traffic"
+  severity: SEV-2
+  category: network
+  affected_service: order-service → payment-service
+  expected_resolution_time: "15-30 minutes"
+
+  description: |
+    Una Network Policy fue actualizada incorrectamente y ahora bloquea
+    la comunicación entre order-service y payment-service. Los pagos
+    empiezan a fallar con timeout errors.
+
+  symptoms:
+    - "Payment timeouts en order-service logs"
+    - "payment-service readiness probe sigue pasando (está healthy)"
+    - "Pero order-service no puede alcanzarlo"
+    - "Error: 'connect: connection timed out'"
+    - "Métrica orders_created_total{status='payment_timeout'} incrementando"
+
+  injection:
+    method: "Aplicar NetworkPolicy restrictiva"
+    commands:
+      - description: "Aplicar policy que bloquea egress del order-service"
+        command: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: block-order-to-payment
+            namespace: applications
+          spec:
+            podSelector:
+              matchLabels:
+                app: order-service
+            policyTypes:
+              - Egress
+            egress:
+              # Solo permite DNS pero NO tráfico a payment-service
+              - to:
+                  - namespaceSelector: {}
+                    podSelector:
+                      matchLabels:
+                        k8s-app: kube-dns
+                ports:
+                  - protocol: UDP
+                    port: 53
+          EOF
+
+  detection:
+    alerts:
+      - "PaymentFailureRateHigh (critical)"
+      - "HighErrorRate on order-service (critical)"
+    debugging:
+      - "kubectl logs -n applications -l app=order-service | grep timeout"
+      - "kubectl get networkpolicies -n applications"
+      - "kubectl describe networkpolicy -n applications"
+      - description: "Test de conectividad desde order-service"
+        command: |
+          kubectl exec -n applications deploy/order-service -- \
+            wget --timeout=5 -qO- http://payment-service:8080/health/live
+
+  cleanup:
+    commands:
+      - "kubectl delete networkpolicy block-order-to-payment -n applications"
+      - "# Verificar que la comunicación se restaura"
+      - "kubectl exec -n applications deploy/order-service -- wget --timeout=5 -qO- http://payment-service:8080/health/live"

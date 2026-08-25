@@ -1,0 +1,181 @@
+# =============================================================================
+# GITHUB ACTIONS - Alternativa a CodePipeline (más popular en la industria)
+# =============================================================================
+#
+# ¿POR QUÉ INCLUIR GITHUB ACTIONS TAMBIÉN?
+# - Es el CI/CD más usado en la industria actualmente
+# - Muchas entrevistas preguntan específicamente por GitHub Actions
+# - Más fácil de configurar para proyectos open source
+# - Demuestra que conoces más de una herramienta
+#
+# ESTE WORKFLOW HACE LO MISMO QUE CODEPIPELINE:
+# 1. Detectar qué servicio cambió
+# 2. Correr tests
+# 3. Build y push de imagen Docker a ECR
+# 4. Actualizar el manifest de K8s con el nuevo image tag
+# 5. ArgoCD sincroniza automáticamente
+#
+# EN ENTREVISTA: "Implementé CI/CD tanto con AWS CodePipeline (nativo) como
+# con GitHub Actions (industria estándar). Ambos siguen el mismo patrón
+# GitOps donde el pipeline solo actualiza manifests en Git y ArgoCD
+# se encarga del deployment real al cluster."
+# =============================================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/**'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPO_PREFIX: production-sim
+
+jobs:
+  # ===========================================================================
+  # JOB 1: Detectar qué servicio cambió
+  # ===========================================================================
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api-gateway: ${{ steps.changes.outputs.api-gateway }}
+      order-service: ${{ steps.changes.outputs.order-service }}
+      payment-service: ${{ steps.changes.outputs.payment-service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            api-gateway:
+              - 'apps/api-gateway/**'
+            order-service:
+              - 'apps/order-service/**'
+            payment-service:
+              - 'apps/payment-service/**'
+
+  # ===========================================================================
+  # JOB 2: Test
+  # ===========================================================================
+  test:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - name: api-gateway
+            changed: ${{ needs.detect-changes.outputs.api-gateway }}
+          - name: order-service
+            changed: ${{ needs.detect-changes.outputs.order-service }}
+          - name: payment-service
+            changed: ${{ needs.detect-changes.outputs.payment-service }}
+    steps:
+      - uses: actions/checkout@v4
+        if: matrix.service.changed == 'true'
+
+      # API Gateway (Node.js)
+      - name: Test API Gateway
+        if: matrix.service.name == 'api-gateway' && matrix.service.changed == 'true'
+        run: |
+          cd apps/api-gateway
+          npm ci
+          npm test
+
+      # Order Service (Python)
+      - name: Test Order Service
+        if: matrix.service.name == 'order-service' && matrix.service.changed == 'true'
+        run: |
+          cd apps/order-service
+          pip install -r requirements.txt
+          python -m pytest tests/ -v
+
+      # Payment Service (Go)
+      - name: Test Payment Service
+        if: matrix.service.name == 'payment-service' && matrix.service.changed == 'true'
+        run: |
+          cd apps/payment-service
+          go test ./... -v -race
+
+  # ===========================================================================
+  # JOB 3: Build, Scan, Push
+  # ===========================================================================
+  build-and-push:
+    needs: [detect-changes, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api-gateway, order-service, payment-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if service changed
+        id: check
+        run: |
+          case "${{ matrix.service }}" in
+            api-gateway) echo "changed=${{ needs.detect-changes.outputs.api-gateway }}" >> $GITHUB_OUTPUT ;;
+            order-service) echo "changed=${{ needs.detect-changes.outputs.order-service }}" >> $GITHUB_OUTPUT ;;
+            payment-service) echo "changed=${{ needs.detect-changes.outputs.payment-service }}" >> $GITHUB_OUTPUT ;;
+          esac
+
+      - name: Configure AWS credentials
+        if: steps.check.outputs.changed == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: steps.check.outputs.changed == 'true'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        if: steps.check.outputs.changed == 'true'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          REPO_URI="$ECR_REGISTRY/$ECR_REPO_PREFIX/${{ matrix.service }}"
+
+          docker build \
+            -t $REPO_URI:$IMAGE_TAG \
+            -t $REPO_URI:latest \
+            apps/${{ matrix.service }}/
+
+          # Security scan con Trivy
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            $REPO_URI:$IMAGE_TAG
+
+          docker push $REPO_URI:$IMAGE_TAG
+          docker push $REPO_URI:latest
+
+      # Actualizar manifest para GitOps
+      - name: Update Kubernetes manifest
+        if: steps.check.outputs.changed == 'true'
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          REPO_URI="$ECR_REGISTRY/$ECR_REPO_PREFIX/${{ matrix.service }}"
+          sed -i "s|image:.*${{ matrix.service }}:.*|image: $REPO_URI:$IMAGE_TAG|g" \
+            k8s/apps/${{ matrix.service }}/deployment.yaml
+
+      - name: Commit manifest update
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add k8s/apps/${{ matrix.service }}/deployment.yaml
+          git commit -m "ci: update ${{ matrix.service }} image to ${{ github.sha }} [skip ci]" || true
+          git push

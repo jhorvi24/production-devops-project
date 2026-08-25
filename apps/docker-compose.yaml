@@ -1,0 +1,130 @@
+# =============================================================================
+# DOCKER COMPOSE - Desarrollo local
+# =============================================================================
+#
+# ¿PARA QUÉ SIRVE ESTE ARCHIVO?
+# Permite correr todos los microservicios localmente con un solo comando:
+# docker-compose up
+#
+# Esto replica el comportamiento del cluster EKS en tu laptop para:
+# - Desarrollo rápido (sin esperar deploys a AWS)
+# - Testing de integración entre servicios
+# - Practicar troubleshooting sin costo
+#
+# EN ENTREVISTA: "Uso docker-compose para replicar el entorno de producción
+# localmente. Los desarrolladores pueden levantar todo el stack con un
+# comando y hacer debugging sin necesidad de desplegar en el cluster."
+# =============================================================================
+
+version: '3.8'
+
+services:
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "3000:3000"
+      - "9091:9090"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - ORDER_SERVICE_URL=http://order-service:8000
+      - PAYMENT_SERVICE_URL=http://payment-service:8080
+      - LOG_LEVEL=debug
+    depends_on:
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  order-service:
+    build: ./order-service
+    ports:
+      - "8000:8000"
+      - "9092:9090"
+    environment:
+      - ENVIRONMENT=development
+      - PORT=8000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=production_sim
+      - DB_USER=dbadmin
+      - DB_PASSWORD=localdev123
+      - PAYMENT_SERVICE_URL=http://payment-service:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "8080:8080"
+      - "9093:9090"
+    environment:
+      - ENVIRONMENT=development
+      - PORT=8080
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=production_sim
+      - DB_USER=dbadmin
+      - DB_PASSWORD=localdev123
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # PostgreSQL local (simula RDS)
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=production_sim
+      - POSTGRES_USER=dbadmin
+      - POSTGRES_PASSWORD=localdev123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbadmin -d production_sim"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis local (simula ElastiCache)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Prometheus local (para verificar métricas)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus/prometheus-local.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - api-gateway
+      - order-service
+      - payment-service
+
+volumes:
+  postgres_data:

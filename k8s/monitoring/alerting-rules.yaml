@@ -1,0 +1,174 @@
+# =============================================================================
+# ALERTING RULES - Reglas de alertas para Prometheus
+# =============================================================================
+#
+# FILOSOFÍA DE ALERTING:
+# - Alerta sobre SÍNTOMAS, no sobre CAUSAS
+# - "Los usuarios experimentan errores" > "CPU está alta"
+# - Cada alerta debe ser ACTIONABLE (si no puedes hacer nada, no alertes)
+# - Usa severity para priorizar: critical > warning > info
+#
+# SLOs (Service Level Objectives):
+# - Disponibilidad: 99.9% (43 min downtime/mes máximo)
+# - Latencia: p99 < 500ms
+# - Error rate: < 1% de requests
+#
+# EN ENTREVISTA: "Definí alerting rules basadas en SLOs del servicio.
+# Las alertas son sobre síntomas que afectan al usuario (error rate alta,
+# latencia elevada) y no sobre causas (CPU alta), porque una alerta
+# debe ser actionable y requerir intervención humana."
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: monitoring
+data:
+  alerts.yml: |
+    groups:
+      # =====================================================================
+      # ALERTAS DE DISPONIBILIDAD (SLO: 99.9%)
+      # =====================================================================
+      - name: availability
+        rules:
+          # Error rate > 5% por 5 minutos
+          - alert: HighErrorRate
+            expr: |
+              sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (app)
+              /
+              sum(rate(http_requests_total[5m])) by (app)
+              > 0.05
+            for: 5m
+            labels:
+              severity: critical
+              team: devops
+            annotations:
+              summary: "High error rate on {{ $labels.app }}"
+              description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+              runbook_url: "https://github.com/YOUR_USERNAME/production-devops-projects/blob/main/incidents/runbooks/high-error-rate.md"
+
+          # Servicio completamente caído
+          - alert: ServiceDown
+            expr: up{job="kubernetes-pods"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              team: devops
+            annotations:
+              summary: "Service {{ $labels.app }} is down"
+              description: "{{ $labels.app }} in namespace {{ $labels.namespace }} has been down for more than 1 minute"
+
+      # =====================================================================
+      # ALERTAS DE LATENCIA (SLO: p99 < 500ms)
+      # =====================================================================
+      - name: latency
+        rules:
+          # P99 latencia > 500ms por 5 minutos
+          - alert: HighLatency
+            expr: |
+              histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (app, le))
+              > 0.5
+            for: 5m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "High p99 latency on {{ $labels.app }}"
+              description: "P99 latency is {{ $value }}s (threshold: 500ms)"
+              runbook_url: "https://github.com/YOUR_USERNAME/production-devops-projects/blob/main/incidents/runbooks/high-latency.md"
+
+          # Upstream (DB) latencia alta
+          - alert: DatabaseLatencyHigh
+            expr: |
+              histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket[5m])) by (query_type, le))
+              > 1
+            for: 3m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "Database query latency is high"
+              description: "P99 DB latency for {{ $labels.query_type }} queries is {{ $value }}s"
+
+      # =====================================================================
+      # ALERTAS DE RECURSOS (Capacidad)
+      # =====================================================================
+      - name: resources
+        rules:
+          # Pod usando > 90% de su memory limit (OOMKill inminente)
+          - alert: PodMemoryHigh
+            expr: |
+              container_memory_usage_bytes{container!=""}
+              /
+              container_spec_memory_limit_bytes{container!=""}
+              > 0.9
+            for: 5m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "Pod {{ $labels.pod }} memory usage > 90%"
+              description: "Memory at {{ $value | humanizePercentage }}. OOMKill risk."
+              runbook_url: "https://github.com/YOUR_USERNAME/production-devops-projects/blob/main/incidents/runbooks/memory-leak.md"
+
+          # Pod en CrashLoopBackOff
+          - alert: PodCrashLooping
+            expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+            for: 5m
+            labels:
+              severity: critical
+              team: devops
+            annotations:
+              summary: "Pod {{ $labels.pod }} is crash looping"
+              description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+
+          # HPA al máximo (no puede escalar más)
+          - alert: HPAMaxedOut
+            expr: |
+              kube_horizontalpodautoscaler_status_current_replicas
+              ==
+              kube_horizontalpodautoscaler_spec_max_replicas
+            for: 15m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "HPA {{ $labels.horizontalpodautoscaler }} is at max replicas"
+              description: "Cannot scale beyond {{ $value }} replicas"
+
+          # Nodo con disco > 85%
+          - alert: NodeDiskPressure
+            expr: |
+              (node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_free_bytes{mountpoint="/"})
+              /
+              node_filesystem_size_bytes{mountpoint="/"}
+              > 0.85
+            for: 5m
+            labels:
+              severity: warning
+              team: devops
+            annotations:
+              summary: "Node {{ $labels.instance }} disk usage > 85%"
+              description: "Disk at {{ $value | humanizePercentage }}"
+              runbook_url: "https://github.com/YOUR_USERNAME/production-devops-projects/blob/main/incidents/runbooks/disk-full.md"
+
+      # =====================================================================
+      # ALERTAS DE NEGOCIO
+      # =====================================================================
+      - name: business
+        rules:
+          # Payment failure rate alta
+          - alert: PaymentFailureRateHigh
+            expr: |
+              sum(rate(payments_processed_total{status="failed"}[5m]))
+              /
+              sum(rate(payments_processed_total[5m]))
+              > 0.1
+            for: 3m
+            labels:
+              severity: critical
+              team: payments
+            annotations:
+              summary: "Payment failure rate is above 10%"
+              description: "{{ $value | humanizePercentage }} of payments are failing"

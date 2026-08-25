@@ -1,0 +1,13 @@
+# =============================================================================
+# TERRAFORM VARIABLES - Ambiente PROD
+# =============================================================================
+# Copia este archivo como terraform.tfvars y ajusta los valores.
+# terraform.tfvars está en .gitignore para no commitear valores sensibles.
+#
+# IMPORTANTE: En producción real, estos valores vendrían de:
+# - CI/CD pipeline (variables de entorno)
+# - Terraform Cloud/Enterprise (workspace variables)
+# - Vault u otro secrets manager
+# =============================================================================
+
+aws_region = "us-east-1"

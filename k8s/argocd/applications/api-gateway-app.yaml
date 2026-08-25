@@ -1,0 +1,60 @@
+# =============================================================================
+# APPLICATION: api-gateway
+# =============================================================================
+#
+# ¿QUÉ ES UN APPLICATION EN ARGOCD?
+# Es el recurso que le dice a ArgoCD:
+# - DÓNDE está el código (repoURL + path)
+# - QUÉ rama observar (targetRevision)
+# - DÓNDE desplegarlo (destination)
+# - CÓMO sincronizar (syncPolicy)
+#
+# SYNC POLICY OPTIONS:
+# - automated: ArgoCD aplica cambios automáticamente al detectar commits
+# - selfHeal: Si alguien hace kubectl edit, ArgoCD lo revierte
+# - prune: Elimina recursos que ya no están en Git
+# =============================================================================
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-gateway
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: production-sim
+    tier: frontend
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/production-devops-projects.git
+    targetRevision: main
+    path: k8s/apps/api-gateway
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: applications
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 1m
+
+  # Health checks adicionales
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas  # Ignorar cambios de HPA en replicas

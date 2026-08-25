@@ -1,0 +1,59 @@
+# =============================================================================
+# APP OF APPS - Patrón para gestionar múltiples aplicaciones
+# =============================================================================
+#
+# ¿QUÉ ES EL PATRÓN "APP OF APPS"?
+# En lugar de crear cada Application manualmente, creamos UNA Application
+# que apunta a un directorio con más Applications. Es recursivo:
+#
+# app-of-apps (esta Application)
+#   └── Monitorea directorio k8s/argocd/applications/
+#       ├── api-gateway-app.yaml
+#       ├── order-service-app.yaml
+#       ├── payment-service-app.yaml
+#       └── monitoring-app.yaml
+#
+# VENTAJAS:
+# - Agregar un nuevo microservicio = crear un archivo YAML y hacer push
+# - ArgoCD detecta el nuevo archivo y crea la Application automáticamente
+# - Un solo punto de gestión para todo el cluster
+#
+# EN ENTREVISTA: "Usé el patrón App of Apps de ArgoCD para gestionar todos
+# los microservicios declarativamente. Agregar un nuevo servicio al cluster
+# es simplemente crear un archivo Application YAML y hacer git push. ArgoCD
+# lo detecta y despliega automáticamente."
+# =============================================================================
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-of-apps
+  namespace: argocd
+  # Finalizer para limpiar recursos cuando se elimina la Application
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/production-devops-projects.git
+    targetRevision: main
+    path: k8s/argocd/applications
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true       # Eliminar recursos que ya no están en Git
+      selfHeal: true    # Re-aplicar si alguien modifica manualmente
+      allowEmpty: false # No sincronizar si el directorio está vacío
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

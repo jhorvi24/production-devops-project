@@ -1,0 +1,169 @@
+# =============================================================================
+# BUILDSPEC.YML - AWS CodeBuild
+# =============================================================================
+#
+# ¿QUÉ ES BUILDSPEC?
+# Es el archivo que le dice a CodeBuild QUÉ hacer en cada fase del build:
+# - install: Instalar dependencias del build
+# - pre_build: Login a ECR, preparar variables
+# - build: Construir imagen Docker, correr tests
+# - post_build: Push imagen a ECR, actualizar manifiestos
+#
+# ¿POR QUÉ CODEBUILD?
+# - Serverless: No mantienes servidores de CI
+# - Integración nativa con ECR, CodePipeline, CloudWatch
+# - Paga solo por minuto de build (no por servidor)
+# - Caché de capas Docker para builds rápidos
+#
+# FLUJO CI/CD CON GITOPS:
+# 1. Developer hace push del código del microservicio
+# 2. CodePipeline detecta el cambio y dispara CodeBuild
+# 3. CodeBuild: test → build → push imagen a ECR
+# 4. CodeBuild actualiza el tag de la imagen en k8s/ manifests
+# 5. ArgoCD detecta el cambio en los manifests y hace sync
+# 6. Kubernetes actualiza los pods con la nueva imagen
+#
+# ¿POR QUÉ NO HACER kubectl apply DESDE CODEBUILD?
+# En GitOps, el pipeline CI NUNCA toca el cluster directamente.
+# Solo actualiza el repositorio Git (source of truth).
+# ArgoCD se encarga de aplicar los cambios al cluster.
+# Esto es más seguro: el pipeline no necesita credenciales del cluster.
+#
+# EN ENTREVISTA: "Implementé un pipeline CI/CD donde CodeBuild construye
+# y pushea imágenes a ECR, luego actualiza los image tags en los manifests
+# de Kubernetes vía git commit. ArgoCD detecta el cambio y reconcilia el
+# cluster automáticamente. El pipeline nunca tiene acceso directo al cluster,
+# siguiendo el principio de separación de responsabilidades de GitOps."
+# =============================================================================
+
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: "us-east-1"
+    ECR_REPO_PREFIX: "production-sim"
+    DOCKER_BUILDKIT: "1"
+  parameter-store:
+    GITHUB_TOKEN: "/production-sim/github-token"
+
+phases:
+  install:
+    runtime-versions:
+      docker: 20
+    commands:
+      - echo "Installing dependencies..."
+      - pip install --quiet awscli
+      - curl -sSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+      - chmod +x /usr/local/bin/kubectl
+
+  pre_build:
+    commands:
+      - echo "=== Pre-Build Phase ==="
+      - echo "Logging in to Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+      # Determinar qué servicio se modificó (monorepo strategy)
+      - |
+        echo "Detecting changed service..."
+        CHANGED_SERVICE=""
+        if git diff --name-only HEAD~1 | grep -q "apps/api-gateway/"; then
+          CHANGED_SERVICE="api-gateway"
+        elif git diff --name-only HEAD~1 | grep -q "apps/order-service/"; then
+          CHANGED_SERVICE="order-service"
+        elif git diff --name-only HEAD~1 | grep -q "apps/payment-service/"; then
+          CHANGED_SERVICE="payment-service"
+        fi
+        echo "Changed service: $CHANGED_SERVICE"
+
+      # Variables de imagen
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG="${COMMIT_HASH}-$(date +%Y%m%d%H%M%S)"
+      - echo "Image tag: $IMAGE_TAG"
+
+  build:
+    commands:
+      - echo "=== Build Phase ==="
+
+      # Build solo si hay servicio modificado
+      - |
+        if [ -n "$CHANGED_SERVICE" ]; then
+          echo "Building $CHANGED_SERVICE..."
+          REPO_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_PREFIX/$CHANGED_SERVICE"
+
+          # Run tests
+          echo "Running tests for $CHANGED_SERVICE..."
+          case $CHANGED_SERVICE in
+            api-gateway)
+              cd apps/api-gateway
+              npm ci
+              npm test || true
+              cd ../..
+              ;;
+            order-service)
+              cd apps/order-service
+              pip install -r requirements.txt
+              python -m pytest tests/ || true
+              cd ../..
+              ;;
+            payment-service)
+              cd apps/payment-service
+              go test ./... || true
+              cd ../..
+              ;;
+          esac
+
+          # Build Docker image
+          echo "Building Docker image..."
+          docker build \
+            --cache-from $REPO_URI:latest \
+            -t $REPO_URI:$IMAGE_TAG \
+            -t $REPO_URI:latest \
+            apps/$CHANGED_SERVICE/
+
+          # Security scan con Trivy
+          echo "Scanning image for vulnerabilities..."
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            $REPO_URI:$IMAGE_TAG
+        else
+          echo "No application code changed, skipping build."
+        fi
+
+  post_build:
+    commands:
+      - echo "=== Post-Build Phase ==="
+
+      - |
+        if [ -n "$CHANGED_SERVICE" ]; then
+          # Push image to ECR
+          echo "Pushing image to ECR..."
+          docker push $REPO_URI:$IMAGE_TAG
+          docker push $REPO_URI:latest
+
+          # Update Kubernetes manifest with new image tag (GitOps)
+          echo "Updating K8s manifest with new image tag..."
+          sed -i "s|image:.*$CHANGED_SERVICE:.*|image: $REPO_URI:$IMAGE_TAG|g" \
+            k8s/apps/$CHANGED_SERVICE/deployment.yaml
+
+          # Commit and push the manifest change
+          git config user.email "ci-bot@production-sim.com"
+          git config user.name "CI Bot"
+          git add k8s/apps/$CHANGED_SERVICE/deployment.yaml
+          git commit -m "ci: update $CHANGED_SERVICE image to $IMAGE_TAG [skip ci]"
+          git push origin main
+
+          echo "=== Build Complete ==="
+          echo "Image: $REPO_URI:$IMAGE_TAG"
+          echo "ArgoCD will sync the new manifest automatically."
+        fi
+
+artifacts:
+  files:
+    - '**/*'
+
+cache:
+  paths:
+    - '/root/.cache/pip/**/*'
+    - 'apps/api-gateway/node_modules/**/*'

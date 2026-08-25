@@ -1,0 +1,40 @@
+# =============================================================================
+# LIMIT RANGES - Valores por defecto y máximos para containers
+# =============================================================================
+#
+# ¿DIFERENCIA ENTRE RESOURCE QUOTA Y LIMIT RANGE?
+# - ResourceQuota: Límite TOTAL del namespace (todos los pods sumados)
+# - LimitRange: Límite POR CONTAINER individual
+#
+# ¿POR QUÉ LIMIT RANGES?
+# Si un developer olvida poner requests/limits en su deployment:
+# - Sin LimitRange: El pod puede consumir recursos ilimitados
+# - Con LimitRange: Se aplican valores por defecto automáticamente
+#
+# Esto es crucial para:
+# - Scheduling correcto (Kubernetes necesita requests para ubicar pods)
+# - Estabilidad (limits previenen que un pod mate al nodo)
+# - Cost management (sabes cuánto consume cada servicio)
+# =============================================================================
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limits
+  namespace: applications
+spec:
+  limits:
+    # Valores por defecto si el developer no especifica
+    - default:
+        cpu: "500m"       # Máximo que puede usar (limit)
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"       # Lo que reserva (request) - garantizado
+        memory: "128Mi"
+      max:
+        cpu: "2"          # Nadie puede pedir más de 2 cores
+        memory: "2Gi"
+      min:
+        cpu: "50m"        # Mínimo 50 millicores
+        memory: "64Mi"
+      type: Container

@@ -1,0 +1,172 @@
+# =============================================================================
+# DEPLOYMENT: api-gateway
+# =============================================================================
+#
+# ¿QUÉ ES UN DEPLOYMENT?
+# Un Deployment declara el estado deseado de tu aplicación:
+# - Cuántas réplicas correr
+# - Qué imagen Docker usar
+# - Qué recursos asignar
+# - Cómo hacer health checks
+# - Estrategia de actualización
+#
+# Kubernetes se encarga de MANTENER ese estado:
+# - Si un pod muere → lo recrea automáticamente
+# - Si un nodo falla → reagenda los pods en otro nodo
+# - Si actualizas la imagen → rolling update sin downtime
+#
+# BUENAS PRÁCTICAS INCLUIDAS AQUÍ:
+# 1. Resource requests/limits (scheduling correcto + protección)
+# 2. Health checks (liveness + readiness probes)
+# 3. Pod Disruption Budget (mínimo de pods durante mantenimiento)
+# 4. Anti-affinity (pods en diferentes nodos para HA)
+# 5. Security context (no root, filesystem read-only)
+# 6. Graceful shutdown (preStop hook + terminationGracePeriod)
+#
+# EN ENTREVISTA: "Configuré deployments con liveness y readiness probes para
+# que Kubernetes detecte pods unhealthy y los reemplace automáticamente.
+# Usé pod anti-affinity para distribuir réplicas entre nodos, evitando
+# single point of failure. El PDB garantiza que siempre haya al menos
+# un pod disponible durante rolling updates o mantenimiento de nodos."
+# =============================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: applications
+  labels:
+    app: api-gateway
+    version: v1
+    tier: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  # Estrategia de actualización: Rolling Update
+  # Garantiza zero-downtime durante deployments
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Máximo 1 pod extra durante update
+      maxUnavailable: 0  # Nunca menos pods que las réplicas deseadas
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        version: v1
+        tier: frontend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: api-gateway
+      terminationGracePeriodSeconds: 30
+
+      # Anti-affinity: No poner 2 réplicas en el mismo nodo
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - api-gateway
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: api-gateway
+          image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/production-sim/api-gateway:latest
+          ports:
+            - containerPort: 3000
+              name: http
+              protocol: TCP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+
+          # Variables de entorno
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: ORDER_SERVICE_URL
+              value: "http://order-service.applications.svc.cluster.local:8000"
+            - name: PAYMENT_SERVICE_URL
+              value: "http://payment-service.applications.svc.cluster.local:8080"
+            - name: LOG_LEVEL
+              value: "info"
+            # Secretos desde Kubernetes secrets
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: host
+
+          # Recursos: requests (garantizados) y limits (máximo)
+          resources:
+            requests:
+              cpu: "100m"      # 0.1 core garantizado
+              memory: "128Mi"  # 128 MB garantizados
+            limits:
+              cpu: "500m"      # Máximo 0.5 cores
+              memory: "512Mi"  # Máximo 512 MB (OOMKilled si excede)
+
+          # Liveness Probe: ¿El proceso está vivo?
+          # Si falla 3 veces → Kubernetes mata y recrea el pod
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Readiness Probe: ¿Puede recibir tráfico?
+          # Si falla → Se remueve del Service (no recibe requests)
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # Startup Probe: ¿Terminó de iniciar?
+          # Útil para apps lentas en arrancar (evita falsos positivos)
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 3000
+            failureThreshold: 30
+            periodSeconds: 2
+
+          # Security Context: Principio de mínimo privilegio
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+
+          # Volumen temporal para archivos que la app necesita escribir
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          # Graceful shutdown
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+
+      volumes:
+        - name: tmp
+          emptyDir: {}

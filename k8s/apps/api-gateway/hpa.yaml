@@ -1,0 +1,63 @@
+# =============================================================================
+# HPA - Horizontal Pod Autoscaler
+# =============================================================================
+#
+# ¿QUÉ HACE EL HPA?
+# Escala automáticamente el número de réplicas basándose en métricas:
+# - CPU > 70% → Crear más pods
+# - CPU < 70% → Reducir pods (con cooldown para evitar flapping)
+#
+# ¿POR QUÉ 70% Y NO 90%?
+# - Deja margen para absorber picos repentinos de tráfico
+# - A 90% ya estás en zona de peligro (latencia alta)
+# - El escalado tarda ~30-60 segundos, necesitas buffer
+#
+# ESCENARIO DE INCIDENTE #9:
+# Si el HPA está mal configurado (maxReplicas muy bajo, o target muy alto),
+# la app no escala a tiempo y los usuarios experimentan timeouts.
+#
+# EN ENTREVISTA: "Configuré HPA con target de 70% CPU y behavior rules para
+# evitar flapping. El scale-up es agresivo (15 segundos de estabilización)
+# para responder rápido a picos, mientras el scale-down es conservador
+# (5 minutos) para evitar oscilar entre estados."
+# =============================================================================
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway-hpa
+  namespace: applications
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  # Behavior: Controla la velocidad de escalado
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 15   # Escala rápido ante carga
+      policies:
+        - type: Pods
+          value: 2                      # Máximo 2 pods por vez
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Espera 5 min antes de reducir
+      policies:
+        - type: Pods
+          value: 1                      # Reduce de a 1 pod
+          periodSeconds: 60

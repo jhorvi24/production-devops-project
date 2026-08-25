@@ -1,0 +1,244 @@
+# =============================================================================
+# NETWORK POLICIES - Control de tráfico entre pods
+# =============================================================================
+#
+# ¿QUÉ SON NETWORK POLICIES?
+# Por defecto, TODOS los pods pueden comunicarse entre sí en Kubernetes.
+# Network Policies son como "firewalls" a nivel de pod que controlan:
+# - Ingress: Quién puede ENVIAR tráfico a este pod
+# - Egress: A dónde puede ENVIAR tráfico este pod
+#
+# ESTRATEGIA: DENY-ALL + ALLOW EXPLÍCITO
+# 1. Primero bloqueamos TODO el tráfico en el namespace
+# 2. Luego abrimos solo las comunicaciones necesarias
+#
+# ¿POR QUÉ ES IMPORTANTE?
+# Si un pod es comprometido (vulnerabilidad), el atacante:
+# - Sin Network Policies: Puede moverse lateralmente a CUALQUIER servicio
+# - Con Network Policies: Solo puede llegar a los servicios permitidos
+#
+# ESTO TAMBIÉN ES UN ESCENARIO DE INCIDENTE (#7):
+# Una Network Policy mal configurada puede bloquear tráfico legítimo
+# y causar un outage. El runbook enseña cómo diagnosticarlo.
+#
+# EN ENTREVISTA: "Implementé una estrategia de deny-all con Network Policies
+# para limitar el blast radius en caso de compromiso. El api-gateway solo
+# puede hablar con order-service y payment-service. Si un pod es vulnerado,
+# el movimiento lateral está bloqueado por defecto."
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# DENY ALL - Bloquear todo tráfico por defecto en el namespace applications
+# -----------------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+  namespace: applications
+spec:
+  podSelector: {}  # Aplica a TODOS los pods del namespace
+  policyTypes:
+    - Ingress
+    - Egress
+
+# -----------------------------------------------------------------------------
+# ALLOW: api-gateway puede recibir tráfico del ingress controller
+# -----------------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-api-gateway
+  namespace: applications
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Solo desde el namespace ingress (donde vive el ALB ingress controller)
+        - namespaceSelector:
+            matchLabels:
+              name: ingress
+      ports:
+        - protocol: TCP
+          port: 3000
+
+# -----------------------------------------------------------------------------
+# ALLOW: api-gateway puede enviar tráfico a order-service y payment-service
+# -----------------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-egress
+  namespace: applications
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+    - Egress
+  egress:
+    # Hacia order-service
+    - to:
+        - podSelector:
+            matchLabels:
+              app: order-service
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Hacia payment-service
+    - to:
+        - podSelector:
+            matchLabels:
+              app: payment-service
+      ports:
+        - protocol: TCP
+          port: 8080
+    # DNS (necesario para resolución de nombres)
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+# -----------------------------------------------------------------------------
+# ALLOW: order-service recibe de api-gateway, envía a RDS y payment-service
+# -----------------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-order-service
+  namespace: applications
+spec:
+  podSelector:
+    matchLabels:
+      app: order-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # Hacia payment-service
+    - to:
+        - podSelector:
+            matchLabels:
+              app: payment-service
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Hacia RDS (fuera del cluster, CIDR de la VPC private subnets)
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/16
+      ports:
+        - protocol: TCP
+          port: 5432
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+# -----------------------------------------------------------------------------
+# ALLOW: payment-service recibe de api-gateway y order-service
+# -----------------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-payment-service
+  namespace: applications
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+        - podSelector:
+            matchLabels:
+              app: order-service
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # Hacia RDS
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/16
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Hacia APIs externas (payment providers) - solo HTTPS
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+# -----------------------------------------------------------------------------
+# ALLOW: Monitoring namespace puede hacer scrape a todos los pods
+# -----------------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: applications
+spec:
+  podSelector: {}  # Todos los pods
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090  # Prometheus metrics port

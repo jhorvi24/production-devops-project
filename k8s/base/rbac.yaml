@@ -1,0 +1,173 @@
+# =============================================================================
+# RBAC - Role-Based Access Control
+# =============================================================================
+#
+# ¿QUÉ ES RBAC?
+# RBAC controla QUIÉN puede hacer QUÉ en el cluster:
+# - Role/ClusterRole: Define permisos (verbos sobre recursos)
+# - RoleBinding/ClusterRoleBinding: Asigna roles a usuarios/groups/service accounts
+#
+# PRINCIPIO DE MÍNIMO PRIVILEGIO:
+# - Developers: Solo ven pods/logs en su namespace (no pueden borrar)
+# - CI/CD (ArgoCD): Puede crear/actualizar deployments (no borrar namespaces)
+# - Monitoring: Solo lectura de métricas
+# - Admin: Full access (solo SRE/DevOps senior)
+#
+# EN ENTREVISTA: "Implementé RBAC siguiendo el principio de mínimo privilegio.
+# Los developers solo pueden ver logs y pods en su namespace. El pipeline CI/CD
+# tiene permisos para desplegar pero no para eliminar recursos críticos. Solo
+# los SRE seniors tienen acceso cluster-admin, y todo queda auditado en los
+# logs del API server."
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ClusterRole: Developer (solo lectura en su namespace)
+# -----------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: developer-readonly
+  labels:
+    rbac.production-sim/type: developer
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/portforward"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+# -----------------------------------------------------------------------------
+# ClusterRole: CI/CD (ArgoCD) - Deploy sin destruir
+# -----------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cicd-deployer
+  labels:
+    rbac.production-sim/type: cicd
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "secrets", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # No puede eliminar namespaces, PVCs, ni nodos
+
+# -----------------------------------------------------------------------------
+# ClusterRole: Monitoring (lectura de métricas)
+# -----------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-reader
+  labels:
+    rbac.production-sim/type: monitoring
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "endpoints", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+
+# -----------------------------------------------------------------------------
+# RoleBinding: Asignar developer-readonly al grupo developers en NS applications
+# -----------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developers-readonly
+  namespace: applications
+subjects:
+  - kind: Group
+    name: developers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: developer-readonly
+  apiGroup: rbac.authorization.k8s.io
+
+# -----------------------------------------------------------------------------
+# ClusterRoleBinding: ArgoCD service account con permisos de deploy
+# -----------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-deployer
+subjects:
+  - kind: ServiceAccount
+    name: argocd-application-controller
+    namespace: argocd
+roleRef:
+  kind: ClusterRole
+  name: cicd-deployer
+  apiGroup: rbac.authorization.k8s.io
+
+# -----------------------------------------------------------------------------
+# ClusterRoleBinding: Prometheus con permisos de lectura
+# -----------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-monitoring
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: monitoring-reader
+  apiGroup: rbac.authorization.k8s.io
+
+# -----------------------------------------------------------------------------
+# Service Accounts para las aplicaciones
+# -----------------------------------------------------------------------------
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-gateway
+  namespace: applications
+  annotations:
+    # IRSA: Asociar un IAM role a este service account
+    # El pod solo tendrá los permisos de este role específico
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/production-sim-api-gateway-role"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: order-service
+  namespace: applications
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/production-sim-order-service-role"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payment-service
+  namespace: applications
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/production-sim-payment-service-role"

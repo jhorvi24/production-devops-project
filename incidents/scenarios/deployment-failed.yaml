@@ -1,0 +1,35 @@
+# =============================================================================
+# ESCENARIO DE INCIDENTE #4: Deployment Fallido
+# =============================================================================
+
+scenario:
+  name: "Failed Deployment - CrashLoopBackOff"
+  severity: SEV-3
+  category: deployment
+  affected_service: api-gateway
+  expected_resolution_time: "5-15 minutes"
+
+  description: |
+    Se desplegó una nueva versión del api-gateway con un bug que causa
+    crash al iniciar. Los pods nuevos entran en CrashLoopBackOff.
+    Los pods viejos siguen sirviendo (por maxUnavailable: 0).
+
+  injection:
+    method: "Desplegar imagen con error intencional"
+    commands:
+      - description: "Desplegar imagen que crashea (comando inválido)"
+        command: |
+          kubectl set image deployment/api-gateway \
+            api-gateway=busybox:latest \
+            -n applications
+
+  detection:
+    alerts:
+      - "PodCrashLooping (critical)"
+    commands:
+      - "kubectl rollout status deployment/api-gateway -n applications"
+      - "kubectl get pods -n applications -l app=api-gateway"
+
+  cleanup:
+    commands:
+      - "kubectl rollout undo deployment/api-gateway -n applications"

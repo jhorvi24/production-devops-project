@@ -1,0 +1,55 @@
+# =============================================================================
+# NAMESPACES - Aislamiento lógico de recursos en el cluster
+# =============================================================================
+#
+# ¿QUÉ ES UN NAMESPACE?
+# Un namespace es un "mini-cluster virtual" dentro de Kubernetes que proporciona:
+# - Aislamiento de recursos (pods de un NS no ven pods de otro)
+# - Scope para RBAC (permisos por namespace)
+# - Resource Quotas (limitar CPU/RAM por equipo)
+# - Network Policies (controlar tráfico entre namespaces)
+#
+# ¿POR QUÉ ESTOS NAMESPACES?
+# - applications: Los microservicios del negocio
+# - monitoring: Stack de observabilidad (Prometheus, Grafana)
+# - argocd: GitOps controller (separado por seguridad)
+# - ingress: Ingress controllers (separados del app code)
+#
+# EN ENTREVISTA: "Separé los workloads en namespaces por dominio para aplicar
+# el principio de mínimo privilegio. Cada namespace tiene sus propios Resource
+# Quotas, Network Policies, y service accounts con permisos limitados. Esto
+# evita que un servicio comprometido pueda afectar a otros."
+# =============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: applications
+  labels:
+    name: applications
+    purpose: business-workloads
+    monitoring: enabled
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    purpose: observability
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    name: argocd
+    purpose: gitops
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress
+  labels:
+    name: ingress
+    purpose: traffic-management

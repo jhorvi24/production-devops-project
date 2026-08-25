@@ -1,0 +1,8 @@
+# =============================================================================
+# TERRAFORM VARIABLES - Ambiente DEV
+# =============================================================================
+# Copia este archivo como terraform.tfvars y ajusta los valores.
+# terraform.tfvars está en .gitignore para no commitear valores sensibles.
+# =============================================================================
+
+aws_region = "us-east-1"

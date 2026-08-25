@@ -1,0 +1,86 @@
+# =============================================================================
+# ARGOCD PROJECT - Aislamiento y control de acceso
+# =============================================================================
+#
+# ¿QUÉ ES UN AppProject?
+# Un Project en ArgoCD es como un "tenant" que define:
+# - Qué repositorios pueden usarse como fuente
+# - A qué namespaces pueden desplegar
+# - Qué recursos de Kubernetes pueden crear
+# - Quién tiene acceso (RBAC)
+#
+# ¿POR QUÉ NO USAR SOLO "default"?
+# En un entorno real con múltiples equipos:
+# - Equipo A no debería poder desplegar en namespace de Equipo B
+# - No todos los repos son confiables
+# - Limitas el blast radius de una mala configuración
+#
+# EN ENTREVISTA: "Creé un AppProject dedicado que restringe los repositorios
+# fuente, namespaces destino, y tipos de recursos que ArgoCD puede crear.
+# Esto implementa aislamiento multi-tenant y previene que una Application
+# mal configurada despliegue en namespaces no autorizados."
+# =============================================================================
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: production-sim
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "Production Incident Simulator project"
+
+  # Repositorios permitidos como fuente
+  sourceRepos:
+    - "https://github.com/YOUR_USERNAME/production-devops-projects.git"
+
+  # Destinos permitidos (cluster + namespace)
+  destinations:
+    - namespace: applications
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: ingress
+      server: https://kubernetes.default.svc
+
+  # Recursos que el proyecto puede crear (whitelist)
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+
+  # Recursos de namespace permitidos
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: "*"
+    - group: apps
+      kind: "*"
+    - group: networking.k8s.io
+      kind: "*"
+    - group: autoscaling
+      kind: "*"
+    - group: policy
+      kind: "*"
+    - group: monitoring.coreos.com
+      kind: "*"
+
+  # Roles del proyecto (RBAC de ArgoCD)
+  roles:
+    - name: developer
+      description: "Can view and sync applications"
+      policies:
+        - p, proj:production-sim:developer, applications, get, production-sim/*, allow
+        - p, proj:production-sim:developer, applications, sync, production-sim/*, allow
+      groups:
+        - developers
+
+    - name: admin
+      description: "Full access to project applications"
+      policies:
+        - p, proj:production-sim:admin, applications, *, production-sim/*, allow
+      groups:
+        - devops-team

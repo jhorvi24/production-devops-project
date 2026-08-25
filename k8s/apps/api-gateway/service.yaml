@@ -1,0 +1,39 @@
+# =============================================================================
+# SERVICE: api-gateway
+# =============================================================================
+#
+# ¿QUÉ ES UN SERVICE?
+# Un Service es una abstracción de red que expone un grupo de pods:
+# - IP estable (los pods cambian de IP al reiniciar, el Service no)
+# - Load balancing entre réplicas
+# - DNS interno (api-gateway.applications.svc.cluster.local)
+#
+# TIPOS DE SERVICES:
+# - ClusterIP (default): Solo accesible dentro del cluster
+# - NodePort: Expone en un puerto del nodo (30000-32767)
+# - LoadBalancer: Crea un ALB/NLB en AWS
+# - ExternalName: Alias DNS a un servicio externo
+#
+# Aquí usamos ClusterIP porque el tráfico externo entra por el Ingress → ALB
+# =============================================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: applications
+  labels:
+    app: api-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: api-gateway
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP

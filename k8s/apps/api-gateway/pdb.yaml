@@ -1,0 +1,26 @@
+# =============================================================================
+# PDB - Pod Disruption Budget
+# =============================================================================
+#
+# ¿QUÉ ES UN PDB?
+# Define el MÍNIMO de pods que deben estar disponibles durante disrupciones
+# voluntarias (mantenimiento de nodos, cluster upgrades, scaling down).
+#
+# Sin PDB: Kubernetes puede terminar TODOS los pods durante un node drain.
+# Con PDB: Kubernetes respeta el mínimo y no procede si lo violaría.
+#
+# EN ENTREVISTA: "El PDB garantiza que durante mantenimiento de nodos o
+# rolling updates, siempre haya al menos 1 pod del api-gateway disponible,
+# evitando downtime durante operaciones planificadas."
+# =============================================================================
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway-pdb
+  namespace: applications
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api-gateway

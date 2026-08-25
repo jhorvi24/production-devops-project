@@ -1,0 +1,56 @@
+# =============================================================================
+# ARGOCD - Instalación y Configuración GitOps
+# =============================================================================
+#
+# ¿QUÉ ES GITOPS?
+# GitOps es un paradigma operacional donde:
+# - Git es la ÚNICA fuente de verdad del estado deseado
+# - Un operador (ArgoCD) RECONCILIA el cluster con lo que dice Git
+# - Cada cambio pasa por PR → Review → Merge → Deploy automático
+#
+# FLUJO GITOPS:
+# Developer → PR → Code Review → Merge → ArgoCD detecta → Sync → Cluster actualizado
+#
+# VENTAJAS vs CI/CD tradicional (push-based):
+# - Auditoría completa: Cada cambio es un commit con autor y timestamp
+# - Rollback instantáneo: git revert = rollback en producción
+# - Drift detection: ArgoCD alerta si alguien modifica el cluster manualmente
+# - Seguridad: El pipeline NO necesita credenciales del cluster
+#
+# ESCENARIO DE INCIDENTE #4 (Deployment fallido):
+# ArgoCD detecta que un deployment falló (pods en CrashLoopBackOff) y
+# puede hacer auto-rollback a la última versión estable.
+#
+# EN ENTREVISTA: "Implementé GitOps con ArgoCD donde el estado deseado
+# del cluster vive en Git. ArgoCD reconcilia continuamente, detecta drift,
+# y permite rollbacks en segundos con git revert. Esto eliminó el acceso
+# directo al cluster para deployments y deja una auditoría completa de
+# quién cambió qué y cuándo."
+# =============================================================================
+#
+# INSTALACIÓN:
+# kubectl create namespace argocd
+# kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+#
+# Para obtener el password inicial:
+# kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+#
+# Para acceder al UI:
+# kubectl port-forward svc/argocd-server -n argocd 8080:443
+# =============================================================================
+---
+# Este archivo es un placeholder para documentar el proceso de instalación.
+# ArgoCD se instala con el manifest oficial y luego se configura con los
+# recursos Application que se definen abajo.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-install-notes
+  namespace: argocd
+data:
+  install-command: |
+    kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+  version: "2.9.x"
+  notes: |
+    Después de instalar, aplicar los Application resources:
+    kubectl apply -f k8s/argocd/applications/
