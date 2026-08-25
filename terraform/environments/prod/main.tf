@@ -21,11 +21,11 @@ terraform {
   required_version = ">= 1.5.0"
 
   backend "s3" {
-    bucket         = "production-sim-terraform-state"
-    key            = "environments/prod/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "terraform-state-lock"
-    encrypt        = true
+    bucket       = "production-sim-terraform-state"
+    key          = "environments/prod/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
   }
 
   required_providers {

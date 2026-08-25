@@ -16,7 +16,7 @@ Este documento compila las respuestas a preguntas comunes de entrevista para pos
 
 ### "¿Cómo manejas el estado de Terraform en equipo?"
 
-> "Backend remoto en S3 con versionado y encriptación KMS. DynamoDB proporciona state locking distribuido para que dos ingenieros no apliquen cambios simultáneamente. Cada ambiente tiene su propio key en S3 para aislamiento total."
+> "Backend remoto en S3 con versionado y encriptación KMS. Uso el locking nativo de S3 (use_lockfile) disponible desde Terraform 1.10+ para que dos ingenieros no apliquen cambios simultáneamente. Cada ambiente tiene su propio key en S3 para aislamiento total. Esto eliminó la necesidad de una tabla DynamoDB adicional, simplificando la infraestructura."
 
 **Mostrar:** `terraform/backend.tf`, `scripts/bootstrap-backend.sh`
 
