@@ -49,7 +49,7 @@ variable "db_name" {
 variable "engine_version" {
   description = "Versión de PostgreSQL"
   type        = string
-  default     = "16.4"
+  default     = "16.15"
 }
 
 variable "multi_az" {
