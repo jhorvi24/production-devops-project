@@ -115,8 +115,8 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
 # Parameter Group - Configuración del motor PostgreSQL
 # -----------------------------------------------------------------------------
 resource "aws_db_parameter_group" "main" {
-  name   = "${var.project_name}-${var.environment}-pg15"
-  family = "postgres15"
+  name   = "${var.project_name}-${var.environment}-pg16"
+  family = "postgres16"
 
   # Logging de queries lentas (útil para troubleshooting)
   parameter {
