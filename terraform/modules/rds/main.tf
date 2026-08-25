@@ -120,8 +120,9 @@ resource "aws_db_parameter_group" "main" {
 
   # Logging de queries lentas (útil para troubleshooting)
   parameter {
-    name  = "log_min_duration_statement"
-    value = "1000"  # Log queries que tarden más de 1 segundo
+    name         = "log_min_duration_statement"
+    value        = "1000"  # Log queries que tarden más de 1 segundo
+    apply_method = "pending-reboot"
   }
 
   # Estadísticas de queries (parámetro estático - requiere reboot)
@@ -131,10 +132,11 @@ resource "aws_db_parameter_group" "main" {
     apply_method = "pending-reboot"
   }
 
-  # Máximo de conexiones (importante para el escenario de incidente #1)
+  # Máximo de conexiones (parámetro estático - requiere reboot)
   parameter {
-    name  = "max_connections"
-    value = "100"
+    name         = "max_connections"
+    value        = "100"
+    apply_method = "pending-reboot"
   }
 
   tags = {
