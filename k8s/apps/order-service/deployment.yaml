@@ -50,7 +50,7 @@ spec:
 
       containers:
         - name: order-service
-          image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/production-sim/order-service:latest
+          image: 001239102331.dkr.ecr.us-east-1.amazonaws.com/production-sim/order-service:latest
           ports:
             - containerPort: 8000
               name: http

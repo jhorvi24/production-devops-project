@@ -81,7 +81,7 @@ spec:
 
       containers:
         - name: api-gateway
-          image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/production-sim/api-gateway:latest
+          image: 001239102331.dkr.ecr.us-east-1.amazonaws.com/production-sim/api-gateway:latest
           ports:
             - containerPort: 3000
               name: http

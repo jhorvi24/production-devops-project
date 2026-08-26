@@ -154,7 +154,7 @@ metadata:
   annotations:
     # IRSA: Asociar un IAM role a este service account
     # El pod solo tendrá los permisos de este role específico
-    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/production-sim-api-gateway-role"
+    eks.amazonaws.com/role-arn: "arn:aws:iam::001239102331:role/production-sim-api-gateway-role"
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -162,7 +162,7 @@ metadata:
   name: order-service
   namespace: applications
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/production-sim-order-service-role"
+    eks.amazonaws.com/role-arn: "arn:aws:iam::001239102331:role/production-sim-order-service-role"
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -170,4 +170,4 @@ metadata:
   name: payment-service
   namespace: applications
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/production-sim-payment-service-role"
+    eks.amazonaws.com/role-arn: "arn:aws:iam::001239102331:role/production-sim-payment-service-role"
