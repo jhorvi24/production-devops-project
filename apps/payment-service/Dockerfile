@@ -19,11 +19,12 @@ FROM golang:1.21-alpine AS builder
 WORKDIR /app
 
 # Copiar go.mod y go.sum primero (cache de dependencias)
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
 
 # Copiar código fuente
 COPY . .
+RUN go mod tidy
 
 # Build estático
 RUN CGO_ENABLED=0 GOOS=linux go build -o /payment-service ./cmd/server
