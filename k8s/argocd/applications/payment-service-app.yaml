@@ -13,7 +13,7 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/jhorvi24/production-devops-projects.git
+    repoURL: https://github.com/jhorvi24/production-devops-project.git
     targetRevision: main
     path: k8s/apps/payment-service
 

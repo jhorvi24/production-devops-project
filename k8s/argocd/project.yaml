@@ -33,7 +33,7 @@ spec:
 
   # Repositorios permitidos como fuente
   sourceRepos:
-    - "https://github.com/jhorvi24/production-devops-projects.git"
+    - "https://github.com/jhorvi24/production-devops-project.git"
 
   # Destinos permitidos (cluster + namespace)
   destinations:
