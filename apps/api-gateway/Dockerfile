@@ -38,8 +38,8 @@ LABEL description="API Gateway for Production Incident Simulator"
 LABEL version="1.0.0"
 
 # Crear usuario non-root
-RUN addgroup -g 1000 -S appgroup && \
-    adduser -u 1000 -S appuser -G appgroup
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
 
 WORKDIR /app
 
