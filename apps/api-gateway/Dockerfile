@@ -26,8 +26,8 @@ WORKDIR /app
 # Copiar solo package files primero (aprovecha caché de Docker)
 COPY package*.json ./
 
-# Instalar todas las dependencias (incluyendo devDependencies para tests)
-RUN npm ci --only=production
+# Instalar solo dependencias de producción
+RUN npm ci --omit=dev
 
 # Stage 2: Production
 FROM node:20-alpine AS production
