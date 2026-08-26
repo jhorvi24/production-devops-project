@@ -234,6 +234,9 @@ aws ecr create-repository --repository-name production-sim/api-gateway --region 
 aws ecr create-repository --repository-name production-sim/order-service --region $REGION 2>/dev/null || true
 aws ecr create-repository --repository-name production-sim/payment-service --region $REGION 2>/dev/null || true
 
+# Generar lockfiles necesarios para los builds
+cd apps/api-gateway && npm install && cd ../..
+
 # Build y push de cada microservicio
 
 # API Gateway
